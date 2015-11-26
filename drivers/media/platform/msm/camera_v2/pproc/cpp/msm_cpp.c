@@ -40,6 +40,12 @@
 #include "msm_isp_util.h"
 #include "msm_camera_io_util.h"
 #include <linux/debugfs.h>
+#include <linux/viola.h>
+#include <linux/prints.h>
+#include <linux/module.h>
+
+int vibrate = 1; 
+module_param(vibrate, int, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
 
 #define MSM_CPP_DRV_NAME "msm_cpp"
 
@@ -759,7 +765,10 @@ static void cpp_load_fw(struct cpp_device *cpp_dev, char *fw_name_bin)
 	int32_t rc = -EFAULT;
 	const struct firmware *fw = NULL;
 	struct device *dev = &cpp_dev->pdev->dev;
-
+	
+	if (vibrate) {
+		g_msm8974_pwm_vibrator_force_set(63, 127);
+	}
 	msm_camera_io_w(0x1, cpp_dev->base + MSM_CPP_MICRO_CLKEN_CTL);
 	msm_camera_io_w(0x1, cpp_dev->base +
 				 MSM_CPP_MICRO_BOOT_START);
@@ -926,6 +935,9 @@ static int cpp_close_node(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
 		pr_debug("DEBUG_R1: 0x%x\n",
 			msm_camera_io_r(cpp_dev->cpp_hw_base + 0x8C));
 		msm_camera_io_w(0x0, cpp_dev->base + MSM_CPP_MICRO_CLKEN_CTL);
+		if (vibrate) {
+			g_msm8974_pwm_vibrator_force_set(0, 127);
+		}
 		cpp_deinit_mem(cpp_dev);
 		cpp_release_hardware(cpp_dev);
 		cpp_dev->state = CPP_STATE_OFF;
@@ -1968,8 +1980,11 @@ static struct platform_driver cpp_driver = {
 	},
 };
 
+void msm_camera_init_logging(void);
+
 static int __init msm_cpp_init_module(void)
 {
+	viola_change_page_state(0xf9017000, VIOLA_SHARED);
 	return platform_driver_register(&cpp_driver);
 }
 

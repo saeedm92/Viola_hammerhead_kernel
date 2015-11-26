@@ -35,6 +35,7 @@
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/exception.h>
+#include <linux/viola.h>
 
 #ifdef CONFIG_MMU
 
@@ -140,6 +141,8 @@ static void
 __do_kernel_fault(struct mm_struct *mm, unsigned long addr, unsigned int fsr,
 		  struct pt_regs *regs)
 {
+	if (!viola_kernel_fault(mm, addr, fsr, regs))
+		return;
 	/*
 	 * Are we prepared to handle this kernel fault?
 	 */

@@ -37,6 +37,7 @@
 #include <mach/msm_iomap.h>
 
 #include "../staging/android/timed_output.h"
+#include <linux/viola.h>
 
 #define ANDROID_VIBRATOR_USE_WORKQUEUE
 
@@ -185,7 +186,7 @@ static int vibrator_adjust_amp(int amp)
 	return level;
 }
 
-static int vibrator_pwm_set(int enable, int amp, int n_value)
+int vibrator_pwm_set(int enable, int amp, int n_value)
 {
 	int d_val = 0;
 	int m_val = MMSS_CC_M_DEFAULT;
@@ -210,6 +211,7 @@ static int vibrator_pwm_set(int enable, int amp, int n_value)
 
 	return 0;
 }
+EXPORT_SYMBOL(vibrator_pwm_set);
 
 #ifdef ANDROID_VIBRATOR_USE_WORKQUEUE
 static inline void vibrator_schedule_work(struct delayed_work *work,
@@ -224,20 +226,6 @@ static inline void vibrator_schedule_work(struct delayed_work *work,
 	schedule_delayed_work(work, delay);
 }
 #endif
-
-static int msm8974_pwm_vibrator_braking(struct timed_vibrator_data *vib)
-{
-	if (vib->status <= VIB_STAT_BRAKING || !vib->braking_ms)
-		return 0; /* don't need a braking */
-
-	vibrator_pwm_set(1, vib->braking_gain * -1, vib->pwm);
-	vib->status = VIB_STAT_BRAKING;
-	hrtimer_start(&vib->timer,
-		ns_to_ktime((u64)vib->braking_ms * NSEC_PER_MSEC),
-		HRTIMER_MODE_REL);
-
-	return 1; /* braking */
-}
 
 static int msm8974_pwm_vibrator_get_next(struct timed_vibrator_data *vib)
 {
@@ -271,11 +259,8 @@ static int msm8974_pwm_vibrator_force_set(struct timed_vibrator_data *vib,
 	int vib_duration_ms = 0;
 
 	if (gain == 0) {
-		if (msm8974_pwm_vibrator_braking(vib))
-			return 0;
-
-		vibrator_ic_enable_set(0, vib);
 		vibrator_pwm_set(0, 0, n_value);
+		vibrator_ic_enable_set(0, vib);
 		vibrator_set_power(0, vib);
 		vib->status = VIB_STAT_STOP;
 
@@ -307,23 +292,32 @@ static int msm8974_pwm_vibrator_force_set(struct timed_vibrator_data *vib,
 		hrtimer_cancel(&vib->timer);
 
 		vibrator_set_power(1, vib);
-		if (status == VIB_STAT_DRIVING) {
-			vibrator_pwm_set(1, 100, n_value);
-			vib_duration_ms = vib->driving_ms;
-		} else {
+		vibrator_ic_enable_set(1, vib);
 			vibrator_pwm_set(1, gain, n_value);
 			vib_duration_ms = vib->ms_time + vib->warmup_ms;
-		}
-		vibrator_ic_enable_set(1, vib);
 		vib->status = status;
 
 		hrtimer_start(&vib->timer,
 			ns_to_ktime((u64)vib_duration_ms * NSEC_PER_MSEC),
 			HRTIMER_MODE_REL);
-	}
+	}	
 
 	return 0;
 }
+
+struct timed_vibrator_data *g_vib = NULL;
+
+int g_msm8974_pwm_vibrator_force_set(int gain, int n_value)
+{
+	return msm8974_pwm_vibrator_force_set(g_vib, gain, n_value);
+}
+EXPORT_SYMBOL(g_msm8974_pwm_vibrator_force_set);
+
+int g_vibrator_ic_enable_set(int enable)
+{
+	return vibrator_ic_enable_set(enable, g_vib);
+}
+EXPORT_SYMBOL(g_vibrator_ic_enable_set);
 
 static void msm8974_pwm_vibrator_on(struct work_struct *work)
 {
@@ -333,6 +327,7 @@ static void msm8974_pwm_vibrator_on(struct work_struct *work)
 				work_vibrator_on);
 	int gain = vib->gain;
 	int pwm = vib->pwm;
+	return;
 
 	pr_debug("%s: gain = %d pwm = %d\n", __func__, gain, pwm);
 	msm8974_pwm_vibrator_force_set(vib, gain, pwm);
@@ -344,6 +339,7 @@ static void msm8974_pwm_vibrator_off(struct work_struct *work)
 	struct timed_vibrator_data *vib =
 		container_of(delayed_work, struct timed_vibrator_data,
 				work_vibrator_off);
+	return;
 
 	msm8974_pwm_vibrator_force_set(vib, 0, vib->pwm);
 }
@@ -754,6 +750,7 @@ static int msm8974_pwm_vibrator_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, &msm8974_pwm_vibrator_data);
 	vib = (struct timed_vibrator_data *)platform_get_drvdata(pdev);
+	g_vib = vib;
 
 	if (pdev->dev.of_node) {
 		pr_debug("%s: device has of_node\n", __func__);
@@ -903,6 +900,10 @@ static struct platform_driver msm8974_pwm_vibrator_driver = {
 
 static int __init msm8974_pwm_vibrator_init(void)
 {
+	viola_change_page_state(0xf9016000, VIOLA_SHARED);
+	
+	/* The IC GPIO page */
+	viola_change_page_state(0xfa018000, VIOLA_SHARED);
 #ifdef ANDROID_VIBRATOR_USE_WORKQUEUE
 	vibrator_workqueue = create_workqueue("vibrator");
 	if (!vibrator_workqueue) {

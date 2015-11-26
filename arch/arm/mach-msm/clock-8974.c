@@ -32,6 +32,7 @@
 #include "clock-voter.h"
 #include "clock-mdss-8974.h"
 #include "clock.h"
+#include <linux/viola.h>
 
 enum {
 	GCC_BASE,
@@ -5587,6 +5588,7 @@ static void __init msm8974_clock_pre_init(void)
 	virt_bases[MMSS_BASE] = ioremap(MMSS_CC_PHYS, MMSS_CC_SIZE);
 	if (!virt_bases[MMSS_BASE])
 		panic("clock-8974: Unable to ioremap MMSS_CC memory!");
+	viola_change_page_state(0xf901b000, VIOLA_SHARED);
 
 	virt_bases[LPASS_BASE] = ioremap(LPASS_CC_PHYS, LPASS_CC_SIZE);
 	if (!virt_bases[LPASS_BASE])
